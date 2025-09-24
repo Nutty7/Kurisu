@@ -324,78 +324,81 @@ class Kurisu(commands.Bot):
                 self.roles_not_found.append(n)
                 logger.warning("Failed to find role %s", n)
 
-    async def on_command_error(self, ctx: KurisuContext, exc: commands.CommandError):
-        author = ctx.author
-        command = ctx.command
-        exc = getattr(exc, 'original', exc)
-        channel = self.err_channel or ctx.channel
+async def on_command_error(self, ctx: KurisuContext, exc: commands.CommandError):
+    author = ctx.author
+    command = ctx.command
+    exc = getattr(exc, 'original', exc)
+    channel = self.err_channel or ctx.channel
 
-        if hasattr(ctx.command, 'on_error'):
+    if hasattr(ctx.command, 'on_error'):
+        return
+
+    # --- Common command errors ---
+    if isinstance(exc, commands.CommandNotFound):
+        return
+
+    elif isinstance(exc, commands.ArgumentParsingError):
+        await ctx.send_help(ctx.command)
+
+    elif isinstance(exc, commands.NoPrivateMessage):
+        await ctx.send(f'`{command}` cannot be used in direct messages.')
+
+    elif isinstance(exc, commands.MissingPermissions):
+        await ctx.send(f"{author.mention} You don't have permission to use `{command}`.")
+
+    elif isinstance(exc, InsufficientStaffRank):
+        await ctx.send(str(exc))
+
+    elif isinstance(exc, commands.CheckFailure):
+        if ctx.cog and ctx.cog.has_error_handler():
             return
+        await ctx.send(f'{author.mention} You cannot use `{command}`.')
 
-        if isinstance(exc, commands.CommandNotFound):
-            return
+    elif isinstance(exc, commands.MissingRequiredArgument):
+        await ctx.send(f'{author.mention} You are missing required argument `{exc.param.name}`.\n')
+        await ctx.send_help(ctx.command)
+        command.reset_cooldown(ctx)
 
-        elif isinstance(exc, commands.ArgumentParsingError):
-            await ctx.send_help(ctx.command)
+    elif isinstance(exc, commands.BadLiteralArgument):
+        choices = " ".join(f"`{literal}`" for literal in exc.literals)
+        await ctx.send(f'Argument `{exc.param.name}` must be one of the following: {choices}.')
+        command.reset_cooldown(ctx)
 
-        elif isinstance(exc, commands.NoPrivateMessage):
-            await ctx.send(f'`{command}` cannot be used in direct messages.')
+    elif isinstance(exc, commands.UserInputError):
+        await ctx.send(f'{author.mention} A bad argument was given: `{exc}`\n')
+        await ctx.send_help(ctx.command)
+        command.reset_cooldown(ctx)
 
-        elif isinstance(exc, commands.MissingPermissions):
-            await ctx.send(f"{author.mention} You don't have permission to use `{command}`.")
+    elif isinstance(exc, commands.MaxConcurrencyReached):
+        await ctx.send('This command is already being executed.')
 
-        elif isinstance(exc, InsufficientStaffRank):
-            await ctx.send(str(exc))
+    elif isinstance(exc, commands.CommandOnCooldown):
+        try:
+            await ctx.message.delete()
+        except (discord.NotFound, discord.Forbidden):
+            pass
+        await ctx.send(
+            f"{author.mention} This command was used {exc.cooldown.per - exc.retry_after:.2f}s ago and is on cooldown. "
+            f"Try again in {exc.retry_after:.2f}s.",
+            delete_after=10
+        )
 
-        elif isinstance(exc, commands.CheckFailure):
-            if ctx.cog and ctx.cog.has_error_handler():
-                return
-            await ctx.send(f'{author.mention} You cannot use `{command}`.')
+    elif isinstance(exc, discord.NotFound):
+        await ctx.send("ID not found.")
 
-        elif isinstance(exc, commands.MissingRequiredArgument):
-            await ctx.send(f'{author.mention} You are missing required argument `{exc.param.name}`.\n')
-            await ctx.send_help(ctx.command)
-            command.reset_cooldown(ctx)
-
-        elif isinstance(exc, commands.BadLiteralArgument):
-            await ctx.send(f'Argument {exc.param.name} must be one of the following `{"` `".join(str(literal) for literal in exc.literals)}`.')
-            command.reset_cooldown(ctx)
-
-        elif isinstance(exc, commands.UserInputError):
-            await ctx.send(f'{author.mention} A bad argument was given: `{exc}`\n')
-            await ctx.send_help(ctx.command)
-            command.reset_cooldown(ctx)
-
-        elif isinstance(exc, commands.MaxConcurrencyReached):
-            await ctx.send('This command is already being executed.')
-
-        elif isinstance(exc, commands.errors.CommandOnCooldown):
-            try:
-                await ctx.message.delete()
-            except (discord.errors.NotFound, discord.errors.Forbidden):
-                pass
-            await ctx.send(f"{author.mention} This command was used {exc.cooldown.per - exc.retry_after:.2f}s ago and is on cooldown. "
-                           f"Try again in {exc.retry_after:.2f}s.", delete_after=10)
-
-        elif isinstance(exc, discord.NotFound):
-            await ctx.send("ID not found.")
-
-        elif isinstance(exc, discord.Forbidden):
-            embed = create_error_embed(ctx, exc)
+    # --- Errors worth reporting to err_channel ---
+    elif isinstance(exc, discord.Forbidden):
+        embed = create_error_embed(ctx, exc)
+        if channel:
             await channel.send(embed=embed)
-            await ctx.send(f"💢 I can't help you if you don't let me!\n`{exc.text}`.")
+        await ctx.send(f"💢 I can't help you if you don't let me!\n`{exc.text}`.")
 
-        elif isinstance(exc, commands.CommandInvokeError):
-            logger.error("", exc_info=exc)
-            await ctx.send(f'{author.mention} `{command}` raised an exception during usage')
-            embed = create_error_embed(ctx, exc)
-            await channel.send(embed=embed)
-        else:
-            logger.error("", exc_info=exc)
-            await ctx.send(f'{author.mention} Unexpected exception occurred while using the command `{command}`')
-            embed = create_error_embed(ctx, exc)
-            await channel.send(embed=embed)
+    elif isinstance(exc, commands.CommandInvokeError):
+        logger.error("CommandInvokeError", exc_info=exc)
+        await ctx.send(f'{author.mention} `{command}` raised an exception during usage')
+        if channel:
+            embed = create_e_
+
 
     async def on_error(self, event_method, *args, **kwargs):
         logger.error("", exc_info=True)
